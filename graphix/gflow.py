@@ -291,7 +291,7 @@ def flowaux(nodes, edges, input, output, v_c, f, l_k, k):
         p_set = N & (nodes - output)
         if len(p_set) == 1:
             p = list(p_set)[0]
-            f[p] = q
+            f[p] = {q}
             l_k[p] = k
             v_out_prime = v_out_prime | {p}
             c_prime = c_prime | {q}
