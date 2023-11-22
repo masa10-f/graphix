@@ -3,6 +3,7 @@ from itertools import combinations
 import networkx as nx
 import numpy as np
 
+from graphix.gflow import flow, gflow
 from graphix.pattern import Pattern
 
 
@@ -11,14 +12,14 @@ class MBQCGraph(nx.Graph):
 
     Attributes
     ----------
-        input: list
-            input nodes
-        output: list
-            output nodes
-        flow: dict
-            (g)flow of the graph
-        layers: list
-            layers of the graph in terms of (g)flow
+    input: list
+        input nodes
+    output: list
+        output nodes
+    flow: dict
+        (g)flow of the graph
+    layers: list
+        layers of the graph in terms of (g)flow
     """
 
     def __init__(self, inputs=[], outputs=[], **kwargs):
@@ -26,11 +27,11 @@ class MBQCGraph(nx.Graph):
         """MBQC graph
         """
         self.flow = dict()
-        self.layers = None
-        self.input_nodes = inputs
+        self.layers = dict()
+        self.set_input_nodes(inputs)
         self.output_nodes = outputs
 
-    def add_node(self, node: int, plane="XY", angle=0):
+    def add_node(self, node: int, plane=None, angle=None, output=False):
         """add a node to the graph
 
         Parameters
@@ -42,7 +43,24 @@ class MBQCGraph(nx.Graph):
         angle: int, optional
             measurement angle, by default 0
         """
-        super().add_node((node, {"plane": plane, "angle": angle}))
+        super().add_node(node, plane=plane, angle=angle, output=output)
+
+    def assign_measurement_info(self, node: int, plane: str, angle: int):
+        """asign measurement info to a node
+
+        Parameters
+        ----------
+        node: int
+            node to asign measurement info
+        plane: str
+            measurement plane
+        angle: int
+            measurement angle
+        """
+        self.nodes[node]["plane"] = plane
+        self.nodes[node]["angle"] = angle
+
+        self.nodes[node]["output"] = False
 
     def set_input_nodes(self, nodes: set):
         """add input nodes to graph
@@ -53,18 +71,24 @@ class MBQCGraph(nx.Graph):
             list of input nodes
         """
         self.input_nodes = nodes
-        self.add_nodes_from(nodes)
+        for node in nodes:
+            self.add_node(node, output=True)
 
-    def add_output_nodes(self, nodes: set):
-        """add output nodes to graph
+    def get_meas_planes(self):
+        """get measurement planes of the graph
 
-        Parameters
-        ----------
-        nodes: list
-            list of output nodes
+        Returns
+        -------
+        meas_planes: dict
+            dictionary of measurement planes
         """
-        self.output_nodes.extend(list(nodes))
-        super().add_nodes_from(nodes)
+        meas_planes = dict()
+        for node in self.nodes:
+            if self.nodes[node]["output"]:
+                continue
+            meas_planes[node] = self.nodes[node]["plane"]
+
+        return meas_planes
 
     def get_pattern(self):
         """returns the pattern of the graph
@@ -74,7 +98,7 @@ class MBQCGraph(nx.Graph):
         Pattern: graphix.pattern.Pattern
             pattern of the graph
         """
-        pattern = Pattern(input_nodes=self.input_nodes, output_nodes=self.output_nodes)
+        pattern = Pattern(input_nodes=self.input_nodes)
         for node in self.nodes:
             pattern.add(["N", node])
 
@@ -84,15 +108,15 @@ class MBQCGraph(nx.Graph):
         x_signals, z_signals = self.collect_signals()
 
         depth = len(self.layers)
-        for k in range(depth - 1, -1, -1):
+        for k in range(depth - 1, 0, -1):
             layer = self.layers[k]
             for node in layer:
                 pattern.add(
                     [
                         "M",
                         node,
-                        self.meas_planes[node],
-                        self.meas_angles[node],
+                        self.nodes[node]["plane"],
+                        self.nodes[node]["angle"],
                         x_signals[node],
                         z_signals[node],
                     ]
@@ -103,6 +127,8 @@ class MBQCGraph(nx.Graph):
                 pattern.add(["X", node, x_signals[node]])
             if len(z_signals[node]) > 0:
                 pattern.add(["Z", node, z_signals[node]])
+
+        pattern.output_nodes = self.output_nodes
 
         return pattern
 
@@ -117,14 +143,17 @@ class MBQCGraph(nx.Graph):
             dictionary of z signals
         """
         x_signals = {node: set() for node in self.nodes}
-        z_signals = dict()
+        z_signals = {node: set() for node in self.nodes}
 
-        for node in self.nodes:
+        for node in self.nodes - set(self.output_nodes):
             for node_fg in self.flow[node]:
                 x_signals[node_fg] |= {node}
 
-            odd_neighbors = self.odd_neighbors(node)
+            odd_neighbors = self.odd_neighbors(self.flow[node])
             for node_fg in odd_neighbors:
+                if node_fg not in self.output_nodes:
+                    if node == node_fg:
+                        continue
                 z_signals[node_fg] ^= {node}
 
         return x_signals, z_signals
@@ -140,9 +169,7 @@ class MBQCGraph(nx.Graph):
         assert self.has_node(target), "Node not in graph"
         neighbors_target = list(self.neighbors(target))
         neighbors_complete_edges = combinations(neighbors_target, 2)
-        local_complemented_edges = set(self.edges).symmetric_difference(
-            neighbors_complete_edges
-        )
+        local_complemented_edges = set(self.edges).symmetric_difference(neighbors_complete_edges)
         self.update(edges=local_complemented_edges)
 
         # modify measurement planes
@@ -174,11 +201,53 @@ class MBQCGraph(nx.Graph):
                 if target in odd_neighbors_node:
                     self.flow[node] = self.flow[node].symmetric_difference({target})
                     if self.meas_planes[node] != None:
-                        self.flow[node] = self.flow[node].symmetric_difference(
-                            self.flow[target]
-                        )
+                        self.flow[node] = self.flow[node].symmetric_difference(self.flow[target])
                 else:
                     pass
+
+    def update_flow(self):
+        """Update the flow of the graph"""
+        fg, l_k = flow(
+            self,
+            input=set(self.input_nodes),
+            output=set(self.output_nodes),
+            meas_planes=self.get_meas_planes(),
+        )
+        if fg == None:
+            fg, l_k = gflow(
+                self,
+                input=set(self.input_nodes),
+                output=set(self.output_nodes),
+                meas_planes=self.get_meas_planes(),
+            )
+
+        if fg == None:
+            raise ValueError("No flow found")
+
+        self.flow = fg
+        for node, k in l_k.items():
+            if k not in self.layers.keys():
+                self.layers[k] = {node}
+            else:
+                self.layers[k] = self.layers[k] | {node}
+
+    def odd_neighbors(self, nodes: set):
+        """Find odd neighbors of a node
+
+        Parameters
+        ----------
+        node: set
+            Nodes to find odd neighbors
+
+        Returns
+        -------
+        odd_neighbors: set
+            Set of odd neighbors
+        """
+        odd_neighbors = set()
+        for node in nodes:
+            odd_neighbors ^= set(self.neighbors(node))
+        return odd_neighbors
 
     def pivot(self, u: int, v: int):
         """Apply pivot to two nodes
@@ -198,15 +267,9 @@ class MBQCGraph(nx.Graph):
         u_vnot_neighbors = uv_all_neighbors.difference(v_neighbors)
         unot_v_neighbors = uv_all_neighbors.difference(u_neighbors)
 
-        complete_edges_uv_uvnot = {
-            (i, j) for i in uv_neighbors for j in u_vnot_neighbors
-        }
-        complete_edges_uv_unotv = {
-            (i, j) for i in uv_neighbors for j in unot_v_neighbors
-        }
-        complete_edges_uvnot_unotv = {
-            (i, j) for i in u_vnot_neighbors for j in unot_v_neighbors
-        }
+        complete_edges_uv_uvnot = {(i, j) for i in uv_neighbors for j in u_vnot_neighbors}
+        complete_edges_uv_unotv = {(i, j) for i in uv_neighbors for j in unot_v_neighbors}
+        complete_edges_uvnot_unotv = {(i, j) for i in u_vnot_neighbors for j in unot_v_neighbors}
 
         E = set(self.edges)
         E = E.symmetric_difference(complete_edges_uv_uvnot)
@@ -236,4 +299,4 @@ class MBQCGraph(nx.Graph):
             Simulator object
         """
         pattern = self.get_pattern()
-        return pattern.simulate(**kwargs)
+        return pattern.simulate_pattern(**kwargs)

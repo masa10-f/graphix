@@ -3,9 +3,12 @@
 accepts desired gate operations and transpile into MBQC measurement patterns.
 
 """
-import numpy as np
-from graphix.ops import Ops
 from copy import deepcopy
+
+import numpy as np
+
+from graphix.mbqcgraph import MBQCGraph
+from graphix.ops import Ops
 from graphix.pattern import Pattern
 from graphix.sim.statevec import Statevec
 
@@ -239,16 +242,12 @@ class Circuit:
             elif instr[0] == "Rz":
                 if opt:
                     ancilla = Nnode
-                    out[instr[1]], seq = self._rz_command_opt(
-                        out[instr[1]], ancilla, instr[2]
-                    )
+                    out[instr[1]], seq = self._rz_command_opt(out[instr[1]], ancilla, instr[2])
                     pattern.seq.extend(seq)
                     Nnode += 1
                 else:
                     ancilla = [Nnode, Nnode + 1]
-                    out[instr[1]], seq = self._rz_command(
-                        out[instr[1]], ancilla, instr[2]
-                    )
+                    out[instr[1]], seq = self._rz_command(out[instr[1]], ancilla, instr[2])
                     pattern.seq.extend(seq)
                     Nnode += 2
             elif instr[0] == "Rzz":
@@ -272,213 +271,179 @@ class Circuit:
 
     def to_mbqcgraph(self):
         inputs = [i for i in range(self.width)]
-        mbqcgraph = MBQCGraph()
-        mbqcgraph.set_input_nodes(inputs)
-        for node in inputs:
-            mbqcgraph.commandnodes[node].output = True
-        mbqcgraph.output_nodes = inputs
+        mbqcgraph = MBQCGraph(inputs=inputs, outputs=[i for i in range(self.width)])
         num_nodes = len(inputs)
         for instr in self.instruction:
             if instr[0] == "CNOT":
                 control = mbqcgraph.output_nodes[instr[1][0]]
                 target = mbqcgraph.output_nodes[instr[1][1]]
-                ancilla1 = CommandNode(num_nodes, 0, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                print(mbqcgraph.nodes)
-                mbqcgraph.add_node(ancilla1)
-                print(mbqcgraph.nodes)
-                mbqcgraph.add_node(ancilla2)
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-                mbqcgraph.add_edge(control, ancilla1.node)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
+                mbqcgraph.add_edge(control, num_nodes)
 
-                mbqcgraph.commandnodes[target].assign_measurement(0, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", 0)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
             elif instr[0] == "I":  # teleportation
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla1 = CommandNode(num_nodes, 0, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
 
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(0, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", 0)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
 
             elif instr[0] == "H":
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla = CommandNode(num_nodes, output=True)
-                mbqcgraph.add_node(ancilla)
-                mbqcgraph.add_edge(target, ancilla.node)
-                mbqcgraph.commandnodes[target].assign_measurement(0, "XY")
+                mbqcgraph.add_node(num_nodes, output=True)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.assign_measurement_info(target, "XY", 0)
 
                 mbqcgraph.flow[target] = {num_nodes}
 
-                mbqcgraph.output_nodes[target] = num_nodes
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes
                 num_nodes += 1
 
             elif instr[0] == "S":
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla1 = CommandNode(num_nodes, 0, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
 
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(-0.5, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", -0.5)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
 
             elif instr[0] == "X":
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla1 = CommandNode(num_nodes, -1, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", -1)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
 
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(0, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", 0)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
 
             elif instr[0] == "Y":
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla1 = CommandNode(num_nodes, 1, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, -0.5, "XY")
-                ancilla3 = CommandNode(num_nodes + 2, 0, "XY")
-                ancilla4 = CommandNode(num_nodes + 3, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", 1.0)
+                mbqcgraph.add_node(num_nodes + 1, "XY", -0.5)
+                mbqcgraph.add_node(num_nodes + 2, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 3, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
-                mbqcgraph.add_node(ancilla3)
-                mbqcgraph.add_node(ancilla4)
-
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-                mbqcgraph.add_edge(ancilla2.node, ancilla3.node)
-                mbqcgraph.add_edge(ancilla3.node, ancilla4.node)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
+                mbqcgraph.add_edge(num_nodes + 1, num_nodes + 2)
+                mbqcgraph.add_edge(num_nodes + 2, num_nodes + 3)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
                 mbqcgraph.flow[num_nodes + 1] = {num_nodes + 2}
                 mbqcgraph.flow[num_nodes + 2] = {num_nodes + 3}
 
-                mbqcgraph.commandnodes[target].assign_measurement(0.5, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", 0.5)
 
-                mbqcgraph.output_nodes[target] = num_nodes + 3
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 3
                 num_nodes += 4
 
             elif instr[0] == "Z":
                 target = mbqcgraph.output_nodes[instr[1]]
-                ancilla = CommandNode(num_nodes, 0, "XY")
+                mbqcgraph.add_node(num_nodes, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                mbqcgraph.add_node(ancilla)
-                mbqcgraph.add_edge(target, ancilla.node)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
 
-                mbqcgraph.commandnodes[target].assign_measurement(-1, "XY")
-
-                mbqcgraph.flow[target] = {num_nodes}
-
-                mbqcgraph.output_nodes[target] = num_nodes
-                num_nodes += 1
-
-            elif instr[0] == "Rx":
-                target = mbqcgraph.output_nodes[instr[1]]
-                angle = instr[2]
-                ancilla1 = CommandNode(num_nodes, -1 * angle / np.pi, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
-
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
-
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(0, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", -1)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
+                num_nodes += 2
+
+            elif instr[0] == "Rx":
+                target = mbqcgraph.output_nodes[instr[1]]
+                angle = instr[2]
+                mbqcgraph.add_node(num_nodes, "XY", -1 * angle / np.pi)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
+
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
+
+                mbqcgraph.assign_measurement_info(target, "XY", 0)
+
+                mbqcgraph.flow[target] = {num_nodes}
+                mbqcgraph.flow[num_nodes] = {num_nodes + 1}
+
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
 
             elif instr[0] == "Ry":
                 target = mbqcgraph.output_nodes[instr[1]]
                 angle = instr[2]
 
-                ancilla1 = CommandNode(num_nodes, -1 * angle / np.pi, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, -0.5, "XY")
-                ancilla3 = CommandNode(num_nodes + 2, 0, "XY")
-                ancilla4 = CommandNode(num_nodes + 3, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", -1 * angle / np.pi)
+                mbqcgraph.add_node(num_nodes + 1, "XY", -0.5)
+                mbqcgraph.add_node(num_nodes + 2, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 3, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
-                mbqcgraph.add_node(ancilla3)
-                mbqcgraph.add_node(ancilla4)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
+                mbqcgraph.add_edge(num_nodes + 1, num_nodes + 2)
+                mbqcgraph.add_edge(num_nodes + 2, num_nodes + 3)
 
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-                mbqcgraph.add_edge(ancilla2.node, ancilla3.node)
-                mbqcgraph.add_edge(ancilla3.node, ancilla4.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(0.5, "XY")
+                mbqcgraph.assign_measurement_info(target, "XY", 0.5)
 
                 mbqcgraph.flow[target] = {num_nodes}
                 mbqcgraph.flow[num_nodes] = {num_nodes + 1}
                 mbqcgraph.flow[num_nodes + 1] = {num_nodes + 2}
                 mbqcgraph.flow[num_nodes + 2] = {num_nodes + 3}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 3
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 3
                 num_nodes += 4
 
             elif instr[0] == "Rz":
                 target = mbqcgraph.output_nodes[instr[1]]
                 angle = instr[2]
 
-                ancilla1 = CommandNode(num_nodes, 0, "XY")
-                ancilla2 = CommandNode(num_nodes + 1, output=True)
+                mbqcgraph.add_node(num_nodes, "XY", 0)
+                mbqcgraph.add_node(num_nodes + 1, output=True)
 
-                mbqcgraph.add_node(ancilla1)
-                mbqcgraph.add_node(ancilla2)
+                mbqcgraph.add_edge(target, num_nodes)
+                mbqcgraph.add_edge(num_nodes, num_nodes + 1)
 
-                mbqcgraph.add_edge(target, ancilla1.node)
-                mbqcgraph.add_edge(ancilla1.node, ancilla2.node)
-
-                mbqcgraph.commandnodes[target].assign_measurement(
-                    -1 * angle / np.pi, "XY"
-                )
+                mbqcgraph.assign_measurement_info(target, "XY", -1 * angle / np.pi)
 
                 mbqcgraph.flow[target] = {num_nodes}
 
-                mbqcgraph.output_nodes[target] = num_nodes + 1
+                mbqcgraph.output_nodes[mbqcgraph.output_nodes.index(target)] = num_nodes + 1
                 num_nodes += 2
 
             elif instr[0] == "Rzz":
@@ -584,9 +549,7 @@ class Circuit:
                 self._E.extend(seq[2:4])
                 self._M.extend(seq[4:6])
                 instr_ = deepcopy(instr)
-                instr_.append(
-                    len(self._M) - 1
-                )  # index of arb angle measurement command
+                instr_.append(len(self._M) - 1)  # index of arb angle measurement command
                 self._instr.append(instr_)
                 self._instr.append(["XC", instr[1], seq[6][2]])
                 self._instr.append(["ZC", instr[1], seq[7][2]])
@@ -598,9 +561,7 @@ class Circuit:
                 self._E.extend(seq[4:8])
                 self._M.extend(seq[8:12])
                 instr_ = deepcopy(instr)
-                instr_.append(
-                    len(self._M) - 3
-                )  # index of arb angle measurement command
+                instr_.append(len(self._M) - 3)  # index of arb angle measurement command
                 self._instr.append(instr_)
                 self._instr.append(["XC", instr[1], seq[12][2]])
                 self._instr.append(["ZC", instr[1], seq[13][2]])
@@ -608,31 +569,23 @@ class Circuit:
             elif instr[0] == "Rz":
                 if opt:
                     ancilla = Nnode
-                    out[instr[1]], seq = self._rz_command_opt(
-                        out[instr[1]], ancilla, instr[2]
-                    )
+                    out[instr[1]], seq = self._rz_command_opt(out[instr[1]], ancilla, instr[2])
                     self._N.append(seq[0])
                     self._E.append(seq[1])
                     self._M.append(seq[2])
                     instr_ = deepcopy(instr)
-                    instr_.append(
-                        len(self._M) - 1
-                    )  # index of arb angle measurement command
+                    instr_.append(len(self._M) - 1)  # index of arb angle measurement command
                     self._instr.append(instr_)
                     self._instr.append(["ZC", instr[1], seq[3][2]])
                     Nnode += 1
                 else:
                     ancilla = [Nnode, Nnode + 1]
-                    out[instr[1]], seq = self._rz_command(
-                        out[instr[1]], ancilla, instr[2]
-                    )
+                    out[instr[1]], seq = self._rz_command(out[instr[1]], ancilla, instr[2])
                     self._N.extend(seq[0:2])
                     self._E.extend(seq[2:4])
                     self._M.extend(seq[4:6])
                     instr_ = deepcopy(instr)
-                    instr_.append(
-                        len(self._M) - 2
-                    )  # index of arb angle measurement command
+                    instr_.append(len(self._M) - 2)  # index of arb angle measurement command
                     self._instr.append(instr_)
                     self._instr.append(["XC", instr[1], seq[6][2]])
                     self._instr.append(["ZC", instr[1], seq[7][2]])
@@ -647,9 +600,7 @@ class Circuit:
                 self._M.append(seq[3])
                 Nnode += 1
                 instr_ = deepcopy(instr)
-                instr_.append(
-                    len(self._M) - 1
-                )  # index of arb angle measurement command
+                instr_.append(len(self._M) - 1)  # index of arb angle measurement command
                 self._instr.append(instr_)
                 self._instr.append(["ZC", instr[1][1], seq[4][2]])
                 self._instr.append(["ZC", instr[1][0], seq[5][2]])
@@ -699,18 +650,12 @@ class Circuit:
     def _commute_with_cnot(self, target):
         assert self._instr[target][0] in ["XC", "ZC"]
         assert self._instr[target + 1][0] == "CNOT"
-        if (
-            self._instr[target][0] == "XC"
-            and self._instr[target][1] == self._instr[target + 1][1][0]
-        ):  # control
+        if self._instr[target][0] == "XC" and self._instr[target][1] == self._instr[target + 1][1][0]:  # control
             new_cmd = ["XC", self._instr[target + 1][1][1], self._instr[target][2]]
             self._commute_with_following(target)
             self._instr.insert(target + 1, new_cmd)
             return target + 1
-        elif (
-            self._instr[target][0] == "ZC"
-            and self._instr[target][1] == self._instr[target + 1][1][1]
-        ):  # target
+        elif self._instr[target][0] == "ZC" and self._instr[target][1] == self._instr[target + 1][1][1]:  # target
             new_cmd = ["ZC", self._instr[target + 1][1][0], self._instr[target][2]]
             self._commute_with_following(target)
             self._instr.insert(target + 1, new_cmd)
@@ -840,9 +785,7 @@ class Circuit:
         moved = 0  # number of moved op
         target = self._find_byproduct_to_move(rev=True, skipnum=moved)
         while target != "end":
-            if (target == len(self._instr) - 1) or (
-                self._instr[target + 1][0] in ["XC", "ZC"]
-            ):
+            if (target == len(self._instr) - 1) or (self._instr[target + 1][0] in ["XC", "ZC"]):
                 moved += 1
                 target = self._find_byproduct_to_move(rev=True, skipnum=moved)
                 continue
@@ -1255,17 +1198,11 @@ class Circuit:
             elif self.instruction[i][0] == "Z":
                 state.evolve_single(Ops.z, self.instruction[i][1])
             elif self.instruction[i][0] == "Rx":
-                state.evolve_single(
-                    Ops.Rx(self.instruction[i][2]), self.instruction[i][1]
-                )
+                state.evolve_single(Ops.Rx(self.instruction[i][2]), self.instruction[i][1])
             elif self.instruction[i][0] == "Ry":
-                state.evolve_single(
-                    Ops.Ry(self.instruction[i][2]), self.instruction[i][1]
-                )
+                state.evolve_single(Ops.Ry(self.instruction[i][2]), self.instruction[i][1])
             elif self.instruction[i][0] == "Rz":
-                state.evolve_single(
-                    Ops.Rz(self.instruction[i][2]), self.instruction[i][1]
-                )
+                state.evolve_single(Ops.Rz(self.instruction[i][2]), self.instruction[i][1])
             elif self.instruction[i][0] == "Rzz":
                 state.evolve(
                     Ops.Rzz(self.instruction[i][2]),
