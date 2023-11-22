@@ -2,6 +2,7 @@ from itertools import combinations
 
 import networkx as nx
 import numpy as np
+import pyzx as zx
 
 from graphix.gflow import flow, gflow
 from graphix.pattern import Pattern
@@ -289,6 +290,23 @@ class MBQCGraph(nx.Graph):
                 self.meas_planes[a] = "XY"
 
         # flow?
+
+    def to_pyzx(self):
+        graph = zx.Graph()
+        index_map = dict()
+        for node in self.nodes - set(self.output_nodes):
+            index = graph.add_vertex(type=zx.VertexType.Z, phase=node.angle)
+            index_map[node] = index
+        for node in set(self.output_nodes):
+            index = graph.add_vertex(type=zx.VertexType.BOUNDARY)
+            index_map[node] = index
+        for edge in self.edges:
+            graph.add_edge(
+                graph.edge(index_map[edge[0]], index_map[edge[1]]),
+                type=zx.EdgeType.HADAMARD,
+            )
+
+        return graph
 
     def simulate_mbqc(self, **kwargs):
         """Simulate the graph using MBQC
